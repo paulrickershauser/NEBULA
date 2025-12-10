@@ -1608,8 +1608,7 @@ def build_star_projections_for_observer(
         # Star projection stage version string.
         "version": STAR_PROJECTION_RUN_META_VERSION,
         # UTC creation time of this per-observer projection entry.
-        "created_utc": datetime.utcnow().isoformat(),
-        # Source file paths (filled by main() at the top level).
+        "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),        
         "frames_source_file": None,
         "gaia_cones_file": None,
         "observer_tracks_file": None,
