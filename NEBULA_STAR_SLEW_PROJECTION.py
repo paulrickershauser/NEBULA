@@ -558,12 +558,52 @@ def _build_star_tracks_for_window_slew(
 
     t_mjd_utc_all = np.asarray(t_mjd_array if t_mjd_array is not None else [], dtype=float)
 
-    # If the coarse time grid is empty, we cannot build any tracks.
+    # If the coarse time grid is empty, fall back to a synthetic grid so we
+    # can still build tracks using the available WCS snapshots. Prefer to
+    # align the length with the WCS sequence (if present), otherwise with the
+    # window's index range. Use the window's mid-time (MJD) if available;
+    # otherwise fill with NaN but continue so downstream consumers still
+    # receive a track.
     if t_mjd_utc_all.size == 0:
-        raise RuntimeError(
-            f"Observer '{obs_name}' has empty 't_mjd_utc'/'t_mjd'; "
-            "cannot build star slew tracks."
-        )
+        wcs_len: Optional[int] = None
+        if isinstance(nebula_wcs_entry, (list, tuple, np.ndarray)):
+            wcs_len = len(nebula_wcs_entry)
+
+        inferred_len = 0
+        if wcs_len is not None:
+            inferred_len = max(inferred_len, wcs_len)
+        inferred_len = max(inferred_len, end_index + 1)
+
+        # Prefer the window's MJD mid-time if available; only fall back to
+        # parsing an ISO `t_mid_utc` string when the MJD is absent.
+        fallback_mid = window_projection.get("t_mid_mjd_utc")
+        if fallback_mid is None and window_projection.get("t_mid_utc") is not None:
+            try:
+                fallback_mid = Time(window_projection.get("t_mid_utc"), scale="utc").mjd
+            except Exception:
+                fallback_mid = None
+
+        # If we still cannot infer a grid length from WCS snapshots or window
+        # indices, seed a single-sample grid when a mid-window time exists so
+        # downstream consumers have something to work with.
+        if inferred_len == 0 and fallback_mid is not None:
+            inferred_len = 1
+
+        if inferred_len > 0:
+            fill_value = float(fallback_mid) if fallback_mid is not None else np.nan
+            t_mjd_utc_all = np.full(inferred_len, fill_value, dtype=float)
+            logger.warning(
+                "Observer '%s' has empty 't_mjd_utc'/'t_mjd'; using synthetic "
+                "grid of length %d filled with t_mid_mjd_utc=%r.",
+                obs_name,
+                inferred_len,
+                fallback_mid,
+            )
+        else:
+            raise RuntimeError(
+                f"Observer '{obs_name}' has empty 't_mjd_utc'/'t_mjd' and no WCS "
+                "entries; cannot build star slew tracks."
+            )
 
     # Optional guard: ensure indices are within valid range [0, N-1].
     if start_index < 0 or end_index >= t_mjd_utc_all.size:
