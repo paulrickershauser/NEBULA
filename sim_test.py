@@ -52,6 +52,7 @@ pixel pickles by toggling the FORCE_RECOMPUTE flag below.
 from typing import Dict, Any, Optional
 import logging
 import numpy as np
+import os
 
 # ---------------------------------------------------------------------------
 # NEBULA imports
@@ -59,6 +60,8 @@ import numpy as np
 
 # Import the sensor configuration (if you want to override the default).
 from Configuration.NEBULA_SENSOR_CONFIG import ACTIVE_SENSOR
+from Configuration import NEBULA_PATH_CONFIG
+from Configuration.NEBULA_STAR_CONFIG import NEBULA_STAR_CATALOG
 
 # Import the pixel pickler that runs the full chain and attaches pixel data.
 from Utility.SAT_OBJECTS import NEBULA_PIXEL_PICKLER
@@ -91,7 +94,7 @@ FORCE_RECOMPUTE: bool = False
 
 # Flag that controls whether to build photon-domain per-target time series
 # and save obs_target_frames pickles (raw + ranked) via NEBULA_TARGET_PHOTONS.
-BUILD_TARGET_PHOTON_FRAMES: bool = True
+BUILD_TARGET_PHOTON_FRAMES: bool = False
 
 # Flag that controls whether to run the sky-footprint and Gaia catalog
 # pipeline after TARGET_PHOTON_FRAMES are available. If True, this will:
@@ -642,6 +645,18 @@ def main() -> None:
         # with tracking_mode='sidereal' (and/or all windows, depending on the
         # internal logic of NEBULA_STAR_PROJECTION).
         #
+        # Resolve default paths used by the star-field pipeline so we can
+        # pass them explicitly to downstream modules that do not infer
+        # locations internally.
+        star_projection_path = NEBULA_STAR_PROJECTION._resolve_default_output_path()
+        obs_tracks_path = NEBULA_STAR_PROJECTION._resolve_default_obs_tracks_path()
+        star_slew_output_path = os.path.join(
+            NEBULA_PATH_CONFIG.NEBULA_OUTPUT_DIR,
+            "STARS",
+            getattr(NEBULA_STAR_CATALOG, "name", "UNKNOWN_CATALOG"),
+            "obs_star_slew_projections.pkl",
+        )
+
         # main(...) is expected to:
         #   - Load ranked_target_frames + Gaia cones + obs_tracks from disk,
         #   - Build per-window star projection products,
@@ -658,7 +673,12 @@ def main() -> None:
         #   - Build per-frame star positions for slewing windows only,
         #   - Write obs_star_slew_projections.pkl,
         #   - Return the in-memory obs_star_slew_projections dict (or None).
-        obs_star_slew_projections = NEBULA_STAR_SLEW_PROJECTION.main(logger=logger)
+        obs_star_slew_projections = NEBULA_STAR_SLEW_PROJECTION.main(
+            star_projection_path=star_projection_path,
+            obs_tracks_path=obs_tracks_path,
+            output_path=star_slew_output_path,
+            logger=logger,
+        )
 
         # Star photons: consumes both the sidereal and slew projection
         # products and builds per-star, per-frame photon time series
@@ -671,7 +691,12 @@ def main() -> None:
         #   - Build obs_star_photons[obs_name]["windows"][i]["stars"][...],
         #   - Write obs_star_photons.pkl,
         #   - Return the in-memory obs_star_photons dict (or None).
-        obs_star_photons = NEBULA_STAR_PHOTONS.main(logger=logger)
+        obs_star_photons = NEBULA_STAR_PHOTONS.run_star_photons_pipeline_from_pickles(
+            frames_with_sky_path=NEBULA_STAR_PROJECTION._resolve_default_frames_path(),
+            star_projection_sidereal_path=star_projection_path,
+            star_projection_slew_path=star_slew_output_path,
+            logger=logger,
+        )
 
         # Provide a compact log summary if we actually got an in-memory dict.
         if isinstance(obs_star_photons, dict):

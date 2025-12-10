@@ -499,7 +499,8 @@ def _build_star_tracks_for_window_slew(
         One StarWindowProjection entry from obs_star_projections[obs_name]
         describing a single window and its Gaia stars.
     obs_track : dict
-        Observer track dict with at least "t_mjd_utc".
+        Observer track dict with at least "t_mjd_utc" (or legacy
+        "t_mjd"), used to align coarse indices with timestamps.
     nebula_wcs_entry : object or sequence
         WCS entry for this observer (static or per-timestep sequence)
         returned by build_wcs_for_observer.
@@ -546,14 +547,21 @@ def _build_star_tracks_for_window_slew(
         )
 
     # ------------------------------------------------------------------
-    # 2) Extract t_mjd_utc for all coarse times, then subset to this window
+    # 2) Extract t_mjd_utc (or legacy t_mjd) for all coarse times, then
+    #    subset to this window
     # ------------------------------------------------------------------
-    t_mjd_utc_all = np.asarray(obs_track.get("t_mjd_utc", []), dtype=float)
+    t_mjd_array = obs_track.get("t_mjd_utc")
+
+    # Fall back to legacy 't_mjd' if the newer field is missing/empty.
+    if t_mjd_array is None or (hasattr(t_mjd_array, "__len__") and len(t_mjd_array) == 0):
+        t_mjd_array = obs_track.get("t_mjd")
+
+    t_mjd_utc_all = np.asarray(t_mjd_array if t_mjd_array is not None else [], dtype=float)
 
     # If the coarse time grid is empty, we cannot build any tracks.
     if t_mjd_utc_all.size == 0:
         raise RuntimeError(
-            f"Observer '{obs_name}' has empty 't_mjd_utc'; "
+            f"Observer '{obs_name}' has empty 't_mjd_utc'/'t_mjd'; "
             "cannot build star slew tracks."
         )
 
